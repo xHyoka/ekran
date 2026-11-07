@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Ekran Paylaş</title>
+  <style>
+    * { box-sizing: border-box; }
+    html, body { margin: 0; height: 100%; }
+    body {
+      display: flex; flex-direction: column;
+      background: #111; color: #eee; font-family: system-ui, sans-serif;
+    }
+    header {
+      display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 12px;
+      background: #1b1b1b; border-bottom: 1px solid #2a2a2a;
+    }
+    input {
+      background: #222; color: #eee; border: 1px solid #333; border-radius: 8px;
+      padding: 10px 12px; font-size: 16px; flex: 1 1 160px; min-width: 0;
+    }
+    button {
+      border: 0; border-radius: 8px; padding: 10px 16px; font-size: 15px;
+      cursor: pointer; color: #fff; background: #333;
+    }
+    button:disabled { opacity: .4; cursor: default; }
+    #share { background: #d6336c; }
+    #watch { background: #2f6fde; }
+    #status { width: 100%; font-size: 13px; color: #aaa; }
+    main { position: relative; flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; }
+    video { width: 100%; height: 100%; object-fit: contain; background: #000; }
+    #hint {
+      position: absolute; color: #777; font-size: 15px; text-align: center;
+      line-height: 1.7; padding: 20px;
+    }
+    #play {
+      position: absolute; display: none; font-size: 18px; padding: 16px 26px; background: #2f6fde;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <input id="code" type="password" placeholder="Ortak kod (ikinizde aynı)" autocomplete="off" />
+    <button id="share">Ekranımı paylaş</button>
+    <button id="watch">İzle</button>
+    <button id="stop" disabled>Durdur</button>
+    <div id="status">Hazır</div>
+  </header>
+  <main>
+    <div id="hint">
+      İkiniz de aynı kodu yazın.<br />
+      İzleyen <b>İzle</b>'ye, paylaşan <b>Ekranımı paylaş</b>'a bassın.<br />
+      Tam ekran için görüntüye çift dokun.
+    </div>
+    <video id="video" autoplay playsinline></video>
+    <button id="play">▶ Oynat (sesli)</button>
+  </main>
+
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <script>
+    const PREFIX = 'tc-ekranpaylas-';
+    const $ = (id) => document.getElementById(id);
+    const video = $('video');
+    const codeInput = $('code');
+    let peer = null, call = null, localStream = null, retryTimer = null;
+
+    try { codeInput.value = localStorage.getItem('code') || ''; } catch (e) {}
+
+    // Telefonlarda ekran paylaşma yok, sadece izleme var
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
+      $('share').style.display = 'none';
+    }
+
+    function status(t) { $('status').textContent = t; }
+
+    function getCode() {
+      const c = codeInput.value.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+      if (c.length < 6) { status('Kod en az 6 harf/rakam olsun'); return null; }
+      try { localStorage.setItem('code', c); } catch (e) {}
+      return c;
+    }
+
+    function setBusy(b) {
+      $('share').disabled = b; $('watch').disabled = b; $('stop').disabled = !b;
+      codeInput.disabled = b; $('hint').style.display = b ? 'none' : 'block';
+    }
+
+    function stopAll(msg = 'Durduruldu') {
+      clearTimeout(retryTimer);
+      if (call) call.close();
+      if (peer && !peer.destroyed) peer.destroy();
+      if (localStream) localStream.getTracks().forEach((t) => t.stop());
+      call = peer = localStream = null;
+      video.srcObject = null;
+      $('play').style.display = 'none';
+      setBusy(false);
+      status(msg);
+    }
+
+    const viewerId = (code) => PREFIX + code + '-izleyici';
+
+    function playVideo() {
+      video.muted = false;
+      video.play().then(() => { $('play').style.display = 'none'; })
+        .catch(() => { $('play').style.display = 'block'; });
+    }
+    $('play').onclick = playVideo;
+
+    // ---------- İZLEYEN ----------
+    $('watch').onclick = () => {
+      const code = getCode(); if (!code) return;
+      setBusy(true);
+      status('Sunucuya bağlanılıyor...');
+      peer = new Peer(viewerId(code));
+      peer.on('open', () => status('Hazır, paylaşım bekleniyor...'));
+      peer.on('call', (incoming) => {
+        if (call) call.close();
+        call = incoming;
+        incoming.answer();
+        incoming.on('stream', (stream) => {
+          video.srcObject = stream;
+          playVideo();
+          status('Bağlandı');
+        });
+        incoming.on('close', () => {
+          video.srcObject = null;
+          status('Paylaşım bitti, yeni paylaşım bekleniyor...');
+        });
+      });
+      peer.on('disconnected', () => { if (peer && !peer.destroyed) peer.reconnect(); });
+      peer.on('error', (e) => {
+        if (e.type === 'unavailable-id') stopAll('Bu kodla zaten izleyen açık (başka sekme?). Biraz bekleyip tekrar dene.');
+        else if (e.type === 'network' || e.type === 'server-error') status('Bağlantı sorunu, tekrar deneniyor...');
+        else status('Hata: ' + e.type);
+      });
+    };
+
+    // ---------- PAYLAŞAN ----------
+    $('share').onclick = async () => {
+      const code = getCode(); if (!code) return;
+      try {
+        localStream = await navigator.mediaDevices.getDisplayMedia({
+          video: { frameRate: 30 }, audio: true,
+        });
+      } catch (e) { status('Ekran alınamadı: ' + e.message); return; }
+
+      setBusy(true);
+      video.srcObject = localStream;
+      video.muted = true;
+      video.play().catch(() => {});
+      localStream.getVideoTracks()[0].onended = () => stopAll('Paylaşım bitti');
+
+      peer = new Peer();
+      const connect = () => {
+        if (!peer || peer.destroyed) return;
+        status('Karşı tarafa bağlanılıyor...');
+        call = peer.call(viewerId(code), localStream);
+        call.on('iceStateChanged', (s) => {
+          if (s === 'connected' || s === 'completed') status('Paylaşılıyor ✓');
+          if (s === 'failed') status('Bağlantı kurulamadı (ağ engelliyor olabilir)');
+          if (s === 'disconnected') status('Bağlantı koptu, bekleniyor...');
+        });
+        call.on('close', () => {
+          if (peer && !peer.destroyed) {
+            status('Karşı taraf ayrıldı, tekrar deneniyor...');
+            retryTimer = setTimeout(connect, 3000);
+          }
+        });
+      };
+      peer.on('open', connect);
+      peer.on('disconnected', () => { if (peer && !peer.destroyed) peer.reconnect(); });
+      peer.on('error', (e) => {
+        if (e.type === 'peer-unavailable') {
+          status('Karşı taraf henüz "İzle"ye basmadı, bekleniyor...');
+          clearTimeout(retryTimer);
+          retryTimer = setTimeout(connect, 3000);
+        } else status('Hata: ' + e.type);
+      });
+    };
+
+    $('stop').onclick = () => stopAll();
+
+    video.ondblclick = () => {
+      if (document.fullscreenElement) document.exitFullscreen();
+      else if (video.requestFullscreen) video.requestFullscreen();
+      else if (video.webkitEnterFullscreen) video.webkitEnterFullscreen(); // iPhone
+    };
+  </script>
+</body>
+</html>
