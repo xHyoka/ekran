@@ -8,7 +8,7 @@
     * { box-sizing: border-box; }
     html, body { margin: 0; height: 100%; }
     body {
-      display: flex; flex-direction: column;
+      display: flex; flex-direction: column; touch-action: manipulation;
       background: #111; color: #eee; font-family: system-ui, sans-serif;
     }
     header {
@@ -17,8 +17,9 @@
     }
     input {
       background: #222; color: #eee; border: 1px solid #333; border-radius: 8px;
-      padding: 10px 12px; font-size: 16px; flex: 1 1 160px; min-width: 0;
+      padding: 10px 12px; font-size: 16px; min-width: 0;
     }
+    #code { flex: 1 1 160px; }
     button {
       border: 0; border-radius: 8px; padding: 10px 16px; font-size: 15px;
       cursor: pointer; color: #fff; background: #333;
@@ -27,14 +28,76 @@
     #share { background: #d6336c; }
     #watch { background: #2f6fde; }
     #status { width: 100%; font-size: 13px; color: #aaa; }
-    main { position: relative; flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; }
+
+    main { flex: 1; display: flex; min-height: 0; position: relative; }
+    main:fullscreen, main:-webkit-full-screen { background: #000; }
+    #stage {
+      position: relative; flex: 1; min-width: 0;
+      display: flex; align-items: center; justify-content: center;
+    }
     video { width: 100%; height: 100%; object-fit: contain; background: #000; }
     #hint {
       position: absolute; color: #777; font-size: 15px; text-align: center;
       line-height: 1.7; padding: 20px;
     }
-    #play {
-      position: absolute; display: none; font-size: 18px; padding: 16px 26px; background: #2f6fde;
+    #play { position: absolute; display: none; font-size: 18px; padding: 16px 26px; background: #2f6fde; }
+    .float {
+      position: absolute; bottom: 12px; background: rgba(0,0,0,.6);
+      font-size: 16px; padding: 12px 16px;
+    }
+    #fs { right: 12px; display: none; }
+    #chatToggle { left: 12px; display: none; }
+    #badge {
+      display: none; background: #d6336c; border-radius: 10px; padding: 1px 7px;
+      font-size: 12px; margin-left: 4px;
+    }
+    #toast {
+      position: absolute; top: 12px; left: 50%; transform: translateX(-50%);
+      max-width: 85%; background: rgba(30,30,30,.92); border-radius: 10px;
+      padding: 10px 14px; font-size: 15px; display: none; pointer-events: none;
+    }
+
+    /* Mesaj paneli */
+    #chat {
+      width: 300px; display: flex; flex-direction: column;
+      background: #171717; border-left: 1px solid #2a2a2a;
+    }
+    #chatHead {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 12px; border-bottom: 1px solid #2a2a2a; font-weight: 600;
+    }
+    #chatClose { display: none; padding: 4px 10px; background: transparent; font-size: 18px; }
+    #msgs { flex: 1; overflow-y: auto; padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+    .msg { max-width: 85%; padding: 7px 11px; border-radius: 12px; font-size: 15px; line-height: 1.35; word-wrap: break-word; }
+    .msg .who { font-size: 11px; opacity: .7; margin-bottom: 2px; }
+    .msg.me { align-self: flex-end; background: #2f6fde; border-bottom-right-radius: 4px; }
+    .msg.them { align-self: flex-start; background: #2c2c2c; border-bottom-left-radius: 4px; }
+    .sys { align-self: center; font-size: 12px; color: #777; }
+    #chatForm { display: flex; gap: 6px; padding: 8px; border-top: 1px solid #2a2a2a; }
+    #msgInput { flex: 1; }
+    #sendBtn { background: #d6336c; }
+
+    /* Telefon: panel açılır-kapanır olsun */
+    @media (max-width: 800px) {
+      #chat {
+        position: absolute; left: 0; right: 0; bottom: 0; height: 55%; width: auto;
+        border-left: 0; border-top: 1px solid #2a2a2a; display: none; z-index: 5;
+        background: rgba(23,23,23,.97);
+      }
+      #chat.open { display: flex; }
+      #chatClose { display: block; }
+      #chatToggle.ready { display: block; }
+    }
+    /* Telefon yan çevrilince panel sağda dursun */
+    @media (max-width: 1000px) and (orientation: landscape) and (max-height: 520px) {
+      #chat {
+        position: absolute; top: 0; right: 0; bottom: 0; left: auto; width: 45%; height: auto;
+        border-left: 1px solid #2a2a2a; border-top: 0; display: none; z-index: 5;
+        background: rgba(23,23,23,.95);
+      }
+      #chat.open { display: flex; }
+      #chatClose { display: block; }
+      #chatToggle.ready { display: block; }
     }
   </style>
 </head>
@@ -47,28 +110,44 @@
     <div id="status">Hazır</div>
   </header>
   <main>
-    <div id="hint">
-      İkiniz de aynı kodu yazın.<br />
-      İzleyen <b>İzle</b>'ye, paylaşan <b>Ekranımı paylaş</b>'a bassın.<br />
-      Tam ekran için görüntüye çift dokun.
+    <div id="stage">
+      <div id="hint">
+        İkiniz de aynı kodu yazın.<br />
+        İzleyen <b>İzle</b>'ye, paylaşan <b>Ekranımı paylaş</b>'a bassın.
+      </div>
+      <video id="video" autoplay playsinline></video>
+      <button id="play">▶ Oynat (sesli)</button>
+      <div id="toast"></div>
+      <button id="chatToggle" class="float">💬<span id="badge">0</span></button>
+      <button id="fs" class="float">⛶ Tam ekran</button>
     </div>
-    <video id="video" autoplay playsinline></video>
-    <button id="play">▶ Oynat (sesli)</button>
+    <aside id="chat">
+      <div id="chatHead">
+        <span id="chatTitle">Mesajlar</span>
+        <button id="chatClose">✕</button>
+      </div>
+      <div id="msgs"><div class="sys">Bağlanınca buradan yazışabilirsiniz</div></div>
+      <form id="chatForm" autocomplete="off">
+        <input id="msgInput" placeholder="Mesaj yaz..." disabled />
+        <button id="sendBtn" disabled>Gönder</button>
+      </form>
+    </aside>
   </main>
 
   <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
   <script>
     const PREFIX = 'tc-ekranpaylas-';
+    const NAMES = { sharer: 'Köpek', viewer: 'Sahibe' };
     const $ = (id) => document.getElementById(id);
     const video = $('video');
     const codeInput = $('code');
-    let peer = null, call = null, localStream = null, retryTimer = null;
+    let peer = null, call = null, dataConn = null, localStream = null, retryTimer = null;
+    let myName = '', otherName = '', unread = 0, toastTimer = null;
 
     try { codeInput.value = localStorage.getItem('code') || ''; } catch (e) {}
 
-    // Telefonlarda ekran paylaşma yok, sadece izleme var
     if (!navigator.mediaDevices || !navigator.mediaDevices.getDisplayMedia) {
-      $('share').style.display = 'none';
+      $('share').style.display = 'none'; // telefonda sadece izleme
     }
 
     function status(t) { $('status').textContent = t; }
@@ -83,21 +162,97 @@
     function setBusy(b) {
       $('share').disabled = b; $('watch').disabled = b; $('stop').disabled = !b;
       codeInput.disabled = b; $('hint').style.display = b ? 'none' : 'block';
-    }
-
-    function stopAll(msg = 'Durduruldu') {
-      clearTimeout(retryTimer);
-      if (call) call.close();
-      if (peer && !peer.destroyed) peer.destroy();
-      if (localStream) localStream.getTracks().forEach((t) => t.stop());
-      call = peer = localStream = null;
-      video.srcObject = null;
-      $('play').style.display = 'none';
-      setBusy(false);
-      status(msg);
+      $('chatToggle').classList.toggle('ready', b);
     }
 
     const viewerId = (code) => PREFIX + code + '-izleyici';
+
+    // ---------- MESAJLAŞMA ----------
+    function chatVisible() { return getComputedStyle($('chat')).display !== 'none'; }
+
+    function setChatEnabled(on) {
+      $('msgInput').disabled = !on; $('sendBtn').disabled = !on;
+    }
+
+    function addMsg(text, mine) {
+      const box = $('msgs');
+      const el = document.createElement('div');
+      el.className = 'msg ' + (mine ? 'me' : 'them');
+      const who = document.createElement('div');
+      who.className = 'who';
+      who.textContent = mine ? myName : otherName;
+      const body = document.createElement('div');
+      body.textContent = text;
+      el.append(who, body);
+      box.appendChild(el);
+      box.scrollTop = box.scrollHeight;
+    }
+
+    function addSys(text) {
+      const el = document.createElement('div');
+      el.className = 'sys'; el.textContent = text;
+      $('msgs').appendChild(el);
+      $('msgs').scrollTop = $('msgs').scrollHeight;
+    }
+
+    function notify(text) {
+      if (chatVisible()) return;
+      unread++;
+      $('badge').textContent = unread; $('badge').style.display = 'inline';
+      const t = $('toast');
+      t.textContent = otherName + ': ' + text;
+      t.style.display = 'block';
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => { t.style.display = 'none'; }, 4000);
+    }
+
+    function setupData(conn) {
+      if (dataConn && dataConn !== conn) dataConn.close();
+      dataConn = conn;
+      conn.on('open', () => {
+        setChatEnabled(true);
+        addSys(otherName + ' bağlandı 💕');
+      });
+      conn.on('data', (d) => {
+        if (d && typeof d.text === 'string') { addMsg(d.text, false); notify(d.text); }
+      });
+      conn.on('close', () => {
+        if (dataConn === conn) { setChatEnabled(false); addSys(otherName + ' ayrıldı'); dataConn = null; }
+      });
+    }
+
+    $('chatForm').onsubmit = (e) => {
+      e.preventDefault();
+      const text = $('msgInput').value.trim();
+      if (!text || !dataConn || !dataConn.open) return;
+      dataConn.send({ text });
+      addMsg(text, true);
+      $('msgInput').value = '';
+    };
+
+    $('chatToggle').onclick = () => {
+      $('chat').classList.toggle('open');
+      if ($('chat').classList.contains('open')) {
+        unread = 0; $('badge').style.display = 'none'; $('toast').style.display = 'none';
+        $('msgs').scrollTop = $('msgs').scrollHeight;
+      }
+    };
+    $('chatClose').onclick = () => $('chat').classList.remove('open');
+
+    // ---------- GENEL ----------
+    function stopAll(msg = 'Durduruldu') {
+      clearTimeout(retryTimer);
+      if (call) call.close();
+      if (dataConn) dataConn.close();
+      if (peer && !peer.destroyed) peer.destroy();
+      if (localStream) localStream.getTracks().forEach((t) => t.stop());
+      call = peer = localStream = dataConn = null;
+      video.srcObject = null;
+      $('play').style.display = 'none';
+      setChatEnabled(false);
+      setBusy(false);
+      status(msg);
+    }
 
     function playVideo() {
       video.muted = false;
@@ -106,13 +261,16 @@
     }
     $('play').onclick = playVideo;
 
-    // ---------- İZLEYEN ----------
+    // ---------- İZLEYEN (Sahibe) ----------
     $('watch').onclick = () => {
       const code = getCode(); if (!code) return;
+      myName = NAMES.viewer; otherName = NAMES.sharer;
+      $('chatTitle').textContent = 'Köpek ile mesajlar';
       setBusy(true);
       status('Sunucuya bağlanılıyor...');
       peer = new Peer(viewerId(code));
-      peer.on('open', () => status('Hazır, paylaşım bekleniyor...'));
+      peer.on('open', () => status('Hazır, Köpek bekleniyor...'));
+      peer.on('connection', setupData);
       peer.on('call', (incoming) => {
         if (call) call.close();
         call = incoming;
@@ -124,7 +282,7 @@
         });
         incoming.on('close', () => {
           video.srcObject = null;
-          status('Paylaşım bitti, yeni paylaşım bekleniyor...');
+          status('Paylaşım bitti, Köpek bekleniyor...');
         });
       });
       peer.on('disconnected', () => { if (peer && !peer.destroyed) peer.reconnect(); });
@@ -135,7 +293,7 @@
       });
     };
 
-    // ---------- PAYLAŞAN ----------
+    // ---------- PAYLAŞAN (Köpek) ----------
     $('share').onclick = async () => {
       const code = getCode(); if (!code) return;
       try {
@@ -144,6 +302,8 @@
         });
       } catch (e) { status('Ekran alınamadı: ' + e.message); return; }
 
+      myName = NAMES.sharer; otherName = NAMES.viewer;
+      $('chatTitle').textContent = 'Sahibe ile mesajlar';
       setBusy(true);
       video.srcObject = localStream;
       video.muted = true;
@@ -153,7 +313,8 @@
       peer = new Peer();
       const connect = () => {
         if (!peer || peer.destroyed) return;
-        status('Karşı tarafa bağlanılıyor...');
+        status('Sahibe\'ye bağlanılıyor...');
+        if (!dataConn || !dataConn.open) setupData(peer.connect(viewerId(code), { reliable: true }));
         call = peer.call(viewerId(code), localStream);
         call.on('iceStateChanged', (s) => {
           if (s === 'connected' || s === 'completed') status('Paylaşılıyor ✓');
@@ -162,7 +323,8 @@
         });
         call.on('close', () => {
           if (peer && !peer.destroyed) {
-            status('Karşı taraf ayrıldı, tekrar deneniyor...');
+            status('Sahibe ayrıldı, tekrar deneniyor...');
+            clearTimeout(retryTimer);
             retryTimer = setTimeout(connect, 3000);
           }
         });
@@ -171,7 +333,7 @@
       peer.on('disconnected', () => { if (peer && !peer.destroyed) peer.reconnect(); });
       peer.on('error', (e) => {
         if (e.type === 'peer-unavailable') {
-          status('Karşı taraf henüz "İzle"ye basmadı, bekleniyor...');
+          status('Sahibe henüz "İzle"ye basmadı, bekleniyor...');
           clearTimeout(retryTimer);
           retryTimer = setTimeout(connect, 3000);
         } else status('Hata: ' + e.type);
@@ -180,11 +342,38 @@
 
     $('stop').onclick = () => stopAll();
 
-    video.ondblclick = () => {
-      if (document.fullscreenElement) document.exitFullscreen();
-      else if (video.requestFullscreen) video.requestFullscreen();
-      else if (video.webkitEnterFullscreen) video.webkitEnterFullscreen(); // iPhone
-    };
+    // ---------- TAM EKRAN ----------
+    video.addEventListener('playing', () => { $('fs').style.display = 'block'; });
+    video.addEventListener('emptied', () => { $('fs').style.display = 'none'; });
+
+    const main = document.querySelector('main');
+    function isFull() { return document.fullscreenElement || document.webkitFullscreenElement; }
+
+    function toggleFullscreen() {
+      if (isFull()) {
+        (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+        return;
+      }
+      const req = main.requestFullscreen || main.webkitRequestFullscreen;
+      if (req) {
+        Promise.resolve(req.call(main)).then(() => {
+          if (screen.orientation && screen.orientation.lock) {
+            screen.orientation.lock('landscape').catch(() => {});
+          }
+        }).catch(() => {
+          if (video.webkitEnterFullscreen) video.webkitEnterFullscreen();
+        });
+      } else if (video.webkitEnterFullscreen) {
+        video.webkitEnterFullscreen(); // iPhone
+      }
+    }
+
+    $('fs').onclick = toggleFullscreen;
+    video.ondblclick = toggleFullscreen;
+    document.addEventListener('fullscreenchange', () => {
+      $('fs').textContent = isFull() ? '✕ Küçült' : '⛶ Tam ekran';
+      if (!isFull() && screen.orientation && screen.orientation.unlock) screen.orientation.unlock();
+    });
   </script>
 </body>
 </html>
